@@ -436,31 +436,84 @@ static void handleStatus() {
   server.send(200, "application/json", json);
 }
 
+void handleCheck() {
+  if (!frontAuthOk()) return;
+  wakeIfNeeded();
+  resolveAndCheck(false);
+  handleStatus();
+}
+
 // ---------------- Web UI bits ----------------
+
+static String webHeadHtml(const String& title) {
+  String h;
+  h.reserve(2600);
+  h += "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
+  h += "<title>" + title + "</title>";
+  h += "<style>"
+       ":root{--bg:#ffffff;--fg:#111111;--muted:#555555;--card:#f7f7f7;--border:#d0d0d0;--accent:#2563eb;--ok:#19c37d;--bad:#e53e3e;}"
+       "body.dark{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--border:#334155;--accent:#60a5fa;--ok:#22c55e;--bad:#f87171;}"
+       "body{font-family:Arial,sans-serif;background:var(--bg);color:var(--fg);margin:18px;line-height:1.45;}"
+       "a{color:var(--accent)}"
+       ".topbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}"
+       ".card{padding:10px;border:1px solid var(--border);background:var(--card);border-radius:10px;max-width:560px}"
+       ".btn{display:inline-block;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--fg);text-decoration:none;cursor:pointer}"
+       ".btn.primary{border-color:var(--accent)}"
+       ".muted{color:var(--muted)}"
+       ".dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:8px;border:1px solid var(--border);background:var(--bad);vertical-align:middle}"
+       "</style>";
+  h += "<script>"
+       "function applyTheme(mode){"
+       "  const dark=(mode==='dark');"
+       "  document.body.classList.toggle('dark',dark);"
+       "  const b=document.getElementById('themeBtn');"
+       "  if(b) b.textContent=dark?'Light mode':'Dark mode';"
+       "}"
+       "function initTheme(){"
+       "  const stored=localStorage.getItem('rpm_theme')||'light';"
+       "  applyTheme(stored);"
+       "}"
+       "function toggleTheme(){"
+       "  const next=document.body.classList.contains('dark')?'light':'dark';"
+       "  localStorage.setItem('rpm_theme',next);"
+       "  applyTheme(next);"
+       "}"
+       "</script>";
+  h += "</head><body onload='initTheme()'>";
+  h += "<div class='topbar'><div><h2 style='margin:0'>" + title + "</h2></div>"
+       "<div><button id='themeBtn' class='btn' type='button' onclick='toggleTheme()'>Dark mode</button></div></div>";
+  return h;
+}
+
 static String liveBkmCardHtml() {
   String h;
-  h.reserve(1500);
+  h.reserve(2200);
 
-  h += "<div style='padding:10px;border:1px solid #ddd;border-radius:10px;max-width:560px'>";
+  h += "<div class='card'>";
   h += "<h3 style='margin:0 0 8px 0'>BKM Indicators (Live)</h3>";
 
-  h += "<div style='margin:6px 0'><span id='dotBtn' style='display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:8px;border:1px solid #222;background:#e53e3e;'></span>"
+  h += "<div style='margin:6px 0'><span id='dotBtn' class='dot'></span>"
        "<b>Button Read</b>: <span id='txtBtn'>OFF</span></div>";
 
-  h += "<div style='margin:6px 0'><span id='dotKey' style='display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:8px;border:1px solid #222;background:#e53e3e;'></span>"
+  h += "<div style='margin:6px 0'><span id='dotKey' class='dot'></span>"
        "<b>Key Press</b>: <span id='txtKey'>OFF</span></div>";
 
-  h += "<div style='margin:6px 0'><span id='dotMbo' style='display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:8px;border:1px solid #222;background:#e53e3e;'></span>"
+  h += "<div style='margin:6px 0'><span id='dotMbo' class='dot'></span>"
        "<b>MOBO Output</b>: <span id='txtMbo'>OFF</span></div>";
 
-  h += "<hr style='border:none;border-top:1px solid #eee;margin:10px 0'>";
+  h += "<hr style='border:none;border-top:1px solid var(--border);margin:10px 0'>";
 
   h += "<div style='margin:6px 0'><b>Mode:</b> <span id='txtMode'>...</span></div>";
   h += "<div style='margin:6px 0'><b>ESP IP:</b> <span id='txtEspIp'>...</span></div>";
   h += "<div style='margin:6px 0'><b>Target:</b> <span id='txtTarget'>...</span> "
        "<span id='txtTargetState' style='font-weight:bold'>(...)</span></div>";
 
-  h += "<small>Updates automatically.</small>";
+  h += "<div style='margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
+       "<button class='btn primary' type='button' onclick='runCheck()'>Live Check Now</button>"
+       "<span id='checkStatus' class='muted'>Idle</span>"
+       "</div>";
+
+  h += "<small class='muted'>Status updates automatically. Use Live Check Now to force a fresh target resolve/probe.</small>";
   h += "</div>";
 
   return h;
@@ -468,29 +521,45 @@ static String liveBkmCardHtml() {
 
 static String liveUpdateScript(uint16_t intervalMs = 350) {
   String s;
-  s.reserve(1400);
+  s.reserve(2600);
 
   s += "<script>";
   s += "function setDot(dotId, txtId, on){"
        "  const d=document.getElementById(dotId);"
        "  const t=document.getElementById(txtId);"
-       "  if(d) d.style.background= on ? '#19c37d' : '#e53e3e';"
+       "  if(d) d.style.background= on ? 'var(--ok)' : 'var(--bad)';"
        "  if(t) t.textContent= on ? 'ON' : 'OFF';"
+       "}"
+       "function applyStatus(j){"
+       "  setDot('dotBtn','txtBtn',j.btn);"
+       "  setDot('dotKey','txtKey',j.key);"
+       "  setDot('dotMbo','txtMbo',j.mbo);"
+       "  const m=document.getElementById('txtMode'); if(m) m.textContent=j.mode;"
+       "  const e=document.getElementById('txtEspIp'); if(e) e.textContent=j.espIp;"
+       "  const tt=document.getElementById('txtTarget'); if(tt) tt.textContent=j.targetText;"
+       "  const ts=document.getElementById('txtTargetState');"
+       "  if(ts){ ts.textContent=j.targetOk ? '(OK)' : '(DOWN)'; ts.style.color=j.targetOk ? 'var(--ok)' : 'var(--bad)'; }"
        "}"
        "async function poll(){"
        "  try{"
        "    const r=await fetch('/status',{cache:'no-store'});"
        "    if(!r.ok) return;"
        "    const j=await r.json();"
-       "    setDot('dotBtn','txtBtn',j.btn);"
-       "    setDot('dotKey','txtKey',j.key);"
-       "    setDot('dotMbo','txtMbo',j.mbo);"
-       "    const m=document.getElementById('txtMode'); if(m) m.textContent=j.mode;"
-       "    const e=document.getElementById('txtEspIp'); if(e) e.textContent=j.espIp;"
-       "    const tt=document.getElementById('txtTarget'); if(tt) tt.textContent=j.targetText;"
-       "    const ts=document.getElementById('txtTargetState');"
-       "    if(ts){ ts.textContent=j.targetOk ? '(OK)' : '(DOWN)'; ts.style.color=j.targetOk ? '#19c37d' : '#e53e3e'; }"
+       "    applyStatus(j);"
        "  }catch(e){}"
+       "}"
+       "async function runCheck(){"
+       "  const st=document.getElementById('checkStatus');"
+       "  if(st) st.textContent='Checking...';"
+       "  try{"
+       "    const r=await fetch('/check',{cache:'no-store'});"
+       "    if(!r.ok) throw new Error('HTTP '+r.status);"
+       "    const j=await r.json();"
+       "    applyStatus(j);"
+       "    if(st) st.textContent='Updated';"
+       "  }catch(e){"
+       "    if(st) st.textContent='Check failed';"
+       "  }"
        "}"
        "poll();"
        "setInterval(poll," + String(intervalMs) + ");";
@@ -513,12 +582,12 @@ static String bootHelpHtml() {
 
 static String okPageHtml(const String& msg) {
   String h;
-  h.reserve(4500);
+  h.reserve(5200);
 
-  h += "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body>";
-  h += "<h2>" + msg + "</h2>";
+  h += webHeadHtml(CFG.deviceTitle + " PC Power");
+  h += "<p><b>" + msg + "</b></p>";
   h += liveBkmCardHtml();
-  h += "<p style='margin-top:14px'><a href='/'>Back</a></p>";
+  h += "<p style='margin-top:14px'><a href='/' class='btn'>Back</a></p>";
   h += liveUpdateScript();
   h += "</body></html>";
 
@@ -531,16 +600,15 @@ void handleRoot() {
   wakeIfNeeded();
 
   String html;
-  html.reserve(6500);
+  html.reserve(7800);
 
-  html += "<html><body>";
-  html += "<h2>" + CFG.deviceTitle + " PC Power</h2>";
-  html += "<p><a href='/tap?token=" + CFG.token + "'>Tap Power (250ms)</a></p>";
-  html += "<p><a href='/hold?token=" + CFG.token + "&ms=5000'>Hold 5s</a></p>";
+  html += webHeadHtml(CFG.deviceTitle + " PC Power");
+  html += "<p><a class='btn' href='/tap?token=" + CFG.token + "'>Tap Power (250ms)</a></p>";
+  html += "<p><a class='btn' href='/hold?token=" + CFG.token + "&ms=5000'>Hold 5s</a></p>";
   html += bootHelpHtml();
-  html += "<hr>";
+  html += "<hr style='border:none;border-top:1px solid var(--border);margin:16px 0'>";
   html += liveBkmCardHtml();
-  html += "<hr><p><a href='/config'>Config</a></p>";
+  html += "<hr style='border:none;border-top:1px solid var(--border);margin:16px 0'><p><a class='btn' href='/config'>Config</a></p>";
   html += liveUpdateScript();
   html += "</body></html>";
 
@@ -652,8 +720,9 @@ void setup() {
   server.on("/tap", handleTap);
   server.on("/hold", handleHold);
 
-  // Live status endpoint
+  // Live status + manual check endpoints
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/check", HTTP_GET, handleCheck);
 
   // Config portal routes
   ConfigPortal::registerRoutes(server, CFG);

@@ -207,10 +207,24 @@ inline bool requireAuth(WebServer& server, const String& user, const String& pas
 }
 
 inline String scanJson() {
+  // Clean up any old/incomplete scan first
+  WiFi.scanDelete();
+  delay(50);
+
+  // Keep AP alive while ensuring STA is enabled for scanning
+  WiFi.mode(WIFI_AP_STA);
+  delay(150);
+
   int n = WiFi.scanNetworks(false, true); // async=false, show_hidden=true
-  if (n <= 0) {
+
+  if (n < 0) {
     WiFi.scanDelete();
-    return F("[]");
+    return F("{\"ok\":false,\"error\":\"scan_failed\",\"count\":0,\"items\":[]}");
+  }
+
+  if (n == 0) {
+    WiFi.scanDelete();
+    return F("{\"ok\":true,\"count\":0,\"items\":[]}");
   }
 
   const int MAX_LIST = 15;
@@ -231,8 +245,11 @@ inline String scanJson() {
   }
 
   String out;
-  out.reserve(1600);
-  out += '[';
+  out.reserve(1800);
+  out += F("{\"ok\":true,\"count\":");
+  out += String(count);
+  out += F(",\"items\":[");
+
   for (int k = 0; k < count; k++) {
     int i = idx[k];
     String ssid = WiFi.SSID(i);
@@ -248,7 +265,7 @@ inline String scanJson() {
     out += (open ? F("true") : F("false"));
     out += '}';
   }
-  out += ']';
+  out += F("]}");
 
   WiFi.scanDelete();
   return out;
@@ -259,15 +276,38 @@ inline String configPageHtml(const Settings& cfg) {
   h.reserve(12000);
 
   h += F("<html><head><meta name='viewport' content='width=device-width, initial-scale=1'>");
-  h += F("<style>"
-         "body{font-family:Arial;max-width:920px;margin:18px}"
-         "input{width:320px;max-width:100%}"
-         ".row{margin:8px 0}"
-         "small{color:#444}"
-         "button.small{margin-left:6px;padding:4px 8px}"
-         "</style></head><body>");
+h += F("<style>"
+       ":root{--bg:#ffffff;--fg:#111111;--muted:#444;--card:#f7f7f7;--border:#d0d0d0;--accent:#2563eb;}"
+       "body.dark{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--border:#334155;--accent:#60a5fa;}"
+       "body{font-family:Arial;max-width:920px;margin:18px;background:var(--bg);color:var(--fg)}"
+       "a{color:var(--accent)}"
+       "input,select{width:320px;max-width:100%;background:var(--card);color:var(--fg);border:1px solid var(--border);padding:6px;border-radius:6px}"
+       ".row{margin:8px 0}"
+       "small{color:var(--muted)}"
+       "button{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 12px}"
+       "button.small{margin-left:6px;padding:4px 8px}"
+       ".topbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}"
+       "</style>"
+       "<script>"
+       "function applyTheme(mode){"
+       "  const dark=(mode==='dark');"
+       "  document.body.classList.toggle('dark',dark);"
+       "  const b=document.getElementById('themeBtn');"
+       "  if(b) b.textContent=dark?'Light mode':'Dark mode';"
+       "}"
+       "function initTheme(){"
+       "  const stored=localStorage.getItem('rpm_theme')||'light';"
+       "  applyTheme(stored);"
+       "}"
+       "function toggleTheme(){"
+       "  const next=document.body.classList.contains('dark')?'light':'dark';"
+       "  localStorage.setItem('rpm_theme',next);"
+       "  applyTheme(next);"
+       "}"
+       "</script></head><body onload='initTheme()'>");
 
-  h += F("<h2>Configuration</h2>");
+
+  h += F("<div class='topbar'><div><h2 style='margin:0'>Configuration</h2></div><div><button id='themeBtn' type='button' onclick='toggleTheme()'>Dark mode</button></div></div>");
   h += F("<p><a href='/'>Back to status</a></p>");
 
   h += F("<form method='POST' action='/save'>");
@@ -359,18 +399,25 @@ inline String configPageHtml(const Settings& cfg) {
          "  st.textContent='Scanning...';"
          "  sel.innerHTML='<option value=\"\">-- scanning --</option>';"
          "  try{"
-         "    const r=await fetch('/scan');"
+         "    const r=await fetch('/scan',{method:'GET',cache:'no-store',credentials:'same-origin'});"
+         "    if(!r.ok) throw new Error('HTTP '+r.status);"
          "    const j=await r.json();"
+         "    if(!j.ok){"
+         "      st.textContent='Scan failed';"
+         "      sel.innerHTML='<option value=\"\">-- scan failed --</option>';"
+         "      return;"
+         "    }"
          "    sel.innerHTML='';"
          "    sel.appendChild(new Option('-- choose --',''));"
-         "    j.forEach(n=>{"
+         "    j.items.forEach(n=>{"
          "      const label=`${n.ssid} (${n.rssi} dBm) ${n.open?'[open]':''}`;"
          "      sel.appendChild(new Option(label,n.ssid));"
          "    });"
-         "    st.textContent=`Found ${j.length}`;"
+         "    st.textContent=`Found ${j.count}`;"
          "  }catch(e){"
          "    st.textContent='Scan failed';"
          "    sel.innerHTML='<option value=\"\">-- scan failed --</option>';"
+         "    console.error('WiFi scan error:', e);"
          "  }"
          "}"
          "function pickSsid(){"
