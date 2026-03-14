@@ -29,7 +29,7 @@ struct Settings {
   String token = "1EH5GsOF6mZQZye";
 
   // Target
-  String targetFqdn = "itx-nix.gha.chartermi.net";
+  String targetFqdn = "hostname or IP";
   uint16_t targetPort = 22; // 0 = resolve-only
 
   // Pins

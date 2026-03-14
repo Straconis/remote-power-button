@@ -584,7 +584,7 @@ static String okPageHtml(const String& msg) {
   String h;
   h.reserve(5200);
 
-  h += webHeadHtml(CFG.deviceTitle + " PC Power");
+  h += webHeadHtml(CFG.deviceTitle);
   h += "<p><b>" + msg + "</b></p>";
   h += liveBkmCardHtml();
   h += "<p style='margin-top:14px'><a href='/' class='btn'>Back</a></p>";
@@ -602,7 +602,7 @@ void handleRoot() {
   String html;
   html.reserve(7800);
 
-  html += webHeadHtml(CFG.deviceTitle + " PC Power");
+  html += webHeadHtml(CFG.deviceTitle);
   html += "<p><a class='btn' href='/tap?token=" + CFG.token + "'>Tap Power (250ms)</a></p>";
   html += "<p><a class='btn' href='/hold?token=" + CFG.token + "&ms=5000'>Hold 5s</a></p>";
   html += bootHelpHtml();
